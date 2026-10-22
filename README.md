@@ -39,9 +39,13 @@ npm run dev     # http://localhost:4317
 Other scripts:
 
 ```bash
-npm run build && npm start   # production build, also on port 4317
+npm run build   # static export into out/
 npm run lint
 ```
+
+## Deploying
+
+The app is a static export (`output: "export"`), hosted on GitHub Pages at https://siobhancoady.github.io/knit-chart/. Every push to `main` runs `.github/workflows/deploy.yml`, which builds with `PAGES_BASE_PATH=/knit-chart` and publishes `out/`.
 
 ## How it works
 

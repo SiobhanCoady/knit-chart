@@ -126,7 +126,10 @@ export function KnitChartApp() {
     [acceptImage],
   );
 
-  const onSample = useCallback(() => acceptImage("/samples/mountain-sunset.svg", "mountain-sunset.svg", false), [acceptImage]);
+  const onSample = useCallback(
+    () => acceptImage(`${process.env.NEXT_PUBLIC_BASE_PATH}/samples/mountain-sunset.svg`, "mountain-sunset.svg", false),
+    [acceptImage],
+  );
 
   useEffect(() => {
     if (!image) return;
