@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Crop, Download, FileText, Loader2, RotateCcw, Scissors, X } from "lucide-react";
+import { Crop, Download, FileText, Loader2, Redo2, RotateCcw, Scissors, Undo2, X } from "lucide-react";
 import {
   buildChart,
   type Chart,
@@ -71,6 +71,8 @@ function SettingRow({
 
 const sliderValue = (v: number | readonly number[]) => (Array.isArray(v) ? v[0] : (v as number));
 
+const MAX_UNDO = 200;
+
 export function KnitChartApp() {
   const [image, setImage] = useState<LoadedImage | null>(null);
   const [loadingImage, setLoadingImage] = useState(false);
@@ -86,7 +88,8 @@ export function KnitChartApp() {
   const [gauge, setGauge] = useState({ sts: "22", rows: "28" });
   const [exporting, setExporting] = useState<"png" | "pdf" | null>(null);
   const [selectedCells, setSelectedCells] = useState<ReadonlySet<number>>(() => new Set());
-  const [editedStitches, setEditedStitches] = useState(0);
+  const [originalChart, setOriginalChart] = useState<Chart | null>(null);
+  const [history, setHistory] = useState<{ past: Chart[]; future: Chart[] }>({ past: [], future: [] });
   const [panelTab, setPanelTab] = useState("key");
   const urlRef = useRef<string | null>(null);
 
@@ -135,9 +138,11 @@ export function KnitChartApp() {
     if (!image) return;
     const t = setTimeout(() => {
       try {
-        setChart(buildChart(image.el, settings));
+        const built = buildChart(image.el, settings);
+        setChart(built);
+        setOriginalChart(built);
+        setHistory({ past: [], future: [] });
         setSelectedCells(new Set());
-        setEditedStitches(0);
         setError(null);
       } catch (e) {
         console.error(e);
@@ -171,9 +176,45 @@ export function KnitChartApp() {
     if (!chart) return;
     const result = recolourCells(chart, selectedCells, colour);
     if (!result.changed) return;
+    setHistory((h) => ({ past: [...h.past, chart].slice(-MAX_UNDO), future: [] }));
     setChart(result.chart);
-    setEditedStitches((n) => n + result.changed);
   };
+
+  const undo = () => {
+    const previous = history.past.at(-1);
+    if (!chart || !previous) return;
+    setHistory({ past: history.past.slice(0, -1), future: [chart, ...history.future] });
+    setChart(previous);
+  };
+
+  const redo = () => {
+    const [next, ...rest] = history.future;
+    if (!chart || !next) return;
+    setHistory({ past: [...history.past, chart], future: rest });
+    setChart(next);
+  };
+
+  const onHistoryKey = useEffectEvent((e: KeyboardEvent) => {
+    if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+    if (e.target instanceof Element && e.target.closest("input, textarea, [contenteditable=true]")) return;
+    const key = e.key.toLowerCase();
+    if (key === "z" && !e.shiftKey) undo();
+    else if ((key === "z" && e.shiftKey) || (key === "y" && e.ctrlKey)) redo();
+    else return;
+    e.preventDefault();
+  });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => onHistoryKey(e);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const editedStitches = useMemo(() => {
+    if (!chart || !originalChart || chart === originalChart) return 0;
+    let n = 0;
+    for (let i = 0; i < chart.cells.length; i++) if (chart.cells[i] !== originalChart.cells[i]) n++;
+    return n;
+  }, [chart, originalChart]);
 
   let sharedColour: number | null = null;
   if (chart && hasSelection) {
@@ -460,6 +501,28 @@ export function KnitChartApp() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">
+              <div className="flex items-center gap-1.5">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!history.past.length}
+                  onClick={undo}
+                  title="Undo colour change (⌘Z / Ctrl+Z)"
+                >
+                  <Undo2 data-icon="inline-start" />
+                  Undo
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!history.future.length}
+                  onClick={redo}
+                  title="Redo colour change (⇧⌘Z / Ctrl+Y)"
+                >
+                  <Redo2 data-icon="inline-start" />
+                  Redo
+                </Button>
+              </div>
               <label className="flex items-center gap-2">
                 <Switch checked={highlightFloats} onCheckedChange={setHighlightFloats} />
                 Highlight long floats
