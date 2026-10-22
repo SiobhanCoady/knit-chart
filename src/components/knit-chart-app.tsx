@@ -2,7 +2,19 @@
 
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Crop, Download, FileText, Loader2, Redo2, RotateCcw, Scissors, Undo2, X } from "lucide-react";
+import {
+  Crop,
+  Download,
+  FileText,
+  Loader2,
+  Redo2,
+  RotateCcw,
+  RotateCcwSquare,
+  RotateCwSquare,
+  Scissors,
+  Undo2,
+  X,
+} from "lucide-react";
 import {
   buildChart,
   type Chart,
@@ -13,6 +25,7 @@ import {
   recolourCells,
 } from "@/lib/chart";
 import { exportPdf, exportPng } from "@/lib/export";
+import { addRotation, type Rotation, rotateCrop, rotatedImageUrl } from "@/lib/rotate";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -91,10 +104,19 @@ export function KnitChartApp() {
   const [originalChart, setOriginalChart] = useState<Chart | null>(null);
   const [history, setHistory] = useState<{ past: Chart[]; future: Chart[] }>({ past: [], future: [] });
   const [panelTab, setPanelTab] = useState("key");
+  const [rotation, setRotation] = useState<Rotation>(0);
+  const [rotating, setRotating] = useState(false);
   const urlRef = useRef<string | null>(null);
+  const rotatedUrlRef = useRef<string | null>(null);
+  const originalRef = useRef<LoadedImage | null>(null);
 
   const update = <K extends keyof ChartSettings>(key: K, value: ChartSettings[K]) =>
     setSettings((s) => ({ ...s, [key]: value }));
+
+  const setRotatedUrl = (url: string | null) => {
+    if (rotatedUrlRef.current) URL.revokeObjectURL(rotatedUrlRef.current);
+    rotatedUrlRef.current = url;
+  };
 
   const acceptImage = useCallback(async (url: string, name: string, revoke: boolean) => {
     setLoadingImage(true);
@@ -103,7 +125,10 @@ export function KnitChartApp() {
       const el = await loadImage(url);
       if (urlRef.current) URL.revokeObjectURL(urlRef.current);
       urlRef.current = revoke ? url : null;
-      setImage({ el, url, name });
+      setRotatedUrl(null);
+      originalRef.current = { el, url, name };
+      setImage(originalRef.current);
+      setRotation(0);
       setSettings((s) => ({ ...s, crop: null }));
       setCropping(false);
     } catch (e) {
@@ -113,6 +138,31 @@ export function KnitChartApp() {
       setLoadingImage(false);
     }
   }, []);
+
+  const rotate = async (delta: 90 | -90) => {
+    const original = originalRef.current;
+    if (!original || rotating) return;
+    const next = addRotation(rotation, delta);
+    setRotating(true);
+    try {
+      if (next === 0) {
+        setRotatedUrl(null);
+        setImage(original);
+      } else {
+        const url = await rotatedImageUrl(original.el, next);
+        const el = await loadImage(url);
+        setRotatedUrl(url);
+        setImage({ el, url, name: original.name });
+      }
+      setRotation(next);
+      setSettings((s) => (s.crop ? { ...s, crop: rotateCrop(s.crop, delta) } : s));
+    } catch (e) {
+      console.error(e);
+      setError("We couldn't rotate this picture. Try again, or rotate it before uploading.");
+    } finally {
+      setRotating(false);
+    }
+  };
 
   const onFile = useCallback(
     (file: File) => {
@@ -157,6 +207,7 @@ export function KnitChartApp() {
 
   useEffect(() => () => {
     if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    if (rotatedUrlRef.current) URL.revokeObjectURL(rotatedUrlRef.current);
   }, []);
 
   const hasSelection = selectedCells.size > 0;
@@ -300,7 +351,27 @@ export function KnitChartApp() {
           <CardHeader>
             <CardTitle>Picture</CardTitle>
             <CardDescription className="truncate">{image.name}</CardDescription>
-            <CardAction>
+            <CardAction className="flex gap-1.5">
+              <Button
+                variant="outline"
+                size="icon-sm"
+                onClick={() => rotate(-90)}
+                disabled={rotating || cropping}
+                aria-label="Rotate picture left"
+                title="Rotate left"
+              >
+                <RotateCcwSquare />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon-sm"
+                onClick={() => rotate(90)}
+                disabled={rotating || cropping}
+                aria-label="Rotate picture right"
+                title="Rotate right"
+              >
+                <RotateCwSquare />
+              </Button>
               <Button
                 variant={cropping ? "default" : "outline"}
                 size="sm"
