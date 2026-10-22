@@ -290,6 +290,41 @@ export function buildChart(
     count: usage[old],
   }));
 
+  return summariseChart(width, height, cells, palette, settings, remappedStitches);
+}
+
+/**
+ * Change stitches to one palette colour. The palette keeps its order, so labels and symbols stay put.
+ * Returns the same chart when nothing changes.
+ */
+export function recolourCells(chart: Chart, indices: Iterable<number>, colour: number): { chart: Chart; changed: number } {
+  let cells: Uint8Array | null = null;
+  let changed = 0;
+  for (const i of indices) {
+    if (chart.cells[i] === colour) continue;
+    cells ??= chart.cells.slice();
+    cells[i] = colour;
+    changed++;
+  }
+  if (!cells) return { chart, changed: 0 };
+  return {
+    chart: summariseChart(chart.width, chart.height, cells, chart.palette, chart.settings, chart.remappedStitches),
+    changed,
+  };
+}
+
+function summariseChart(
+  width: number,
+  height: number,
+  cells: Uint8Array,
+  basePalette: PaletteEntry[],
+  settings: ChartSettings,
+  remappedStitches: number,
+): Chart {
+  const usage = basePalette.map(() => 0);
+  for (const c of cells) usage[c]++;
+  const palette = basePalette.map((p, i) => ({ ...p, count: usage[i] }));
+
   const floats = findFloats(cells, width, height, settings.maxFloat);
   const floatsPerGridRow = new Map<number, number>();
   for (const f of floats) floatsPerGridRow.set(f.gridRow, (floatsPerGridRow.get(f.gridRow) ?? 0) + 1);

@@ -20,27 +20,70 @@ export function Swatch({ entry, className }: { entry: PaletteEntry; className?: 
   );
 }
 
-export function ColourKey({ chart }: { chart: Chart }) {
+export function ColourKey({
+  chart,
+  selectedCount = 0,
+  activeColour = null,
+  onPick,
+}: {
+  chart: Chart;
+  /** Number of selected stitches; when non-zero, entries become buttons that apply their colour. */
+  selectedCount?: number;
+  /** The colour every selected stitch shares, or null if they differ. */
+  activeColour?: number | null;
+  onPick?: (colour: number) => void;
+}) {
   const total = chart.width * chart.height;
+  const picking = selectedCount > 0 && !!onPick;
   return (
-    <ul className="grid gap-2 sm:grid-cols-2">
-      {chart.palette.map((p) => (
-        <li key={p.label} className="flex items-center gap-3 rounded-lg border px-3 py-2">
-          <Swatch entry={p} className="size-8 text-sm" />
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium">
-              Colour {p.label}
-              {p.label === "A" && <span className="font-normal text-muted-foreground"> · main colour</span>}
-            </p>
-            <p className="font-mono text-xs text-muted-foreground">{p.hex.toUpperCase()}</p>
-          </div>
-          <div className="text-right">
-            <p className="text-sm font-medium tabular-nums">{p.count.toLocaleString()} sts</p>
-            <p className="text-xs text-muted-foreground tabular-nums">{((p.count / total) * 100).toFixed(1)}%</p>
-          </div>
-        </li>
-      ))}
-    </ul>
+    <div className="space-y-2">
+      {picking && (
+        <p className="text-sm text-muted-foreground">
+          {selectedCount === 1
+            ? "Click a colour to apply it to the selected stitch."
+            : `Click a colour to apply it to all ${selectedCount} selected stitches.`}
+        </p>
+      )}
+      <ul className="grid gap-2 sm:grid-cols-2">
+        {chart.palette.map((p, i) => {
+          const body = (
+            <>
+              <Swatch entry={p} className="size-8 text-sm" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium">
+                  Colour {p.label}
+                  {p.label === "A" && <span className="font-normal text-muted-foreground"> · main colour</span>}
+                </p>
+                <p className="font-mono text-xs text-muted-foreground">{p.hex.toUpperCase()}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-sm font-medium tabular-nums">{p.count.toLocaleString()} sts</p>
+                <p className="text-xs text-muted-foreground tabular-nums">{((p.count / total) * 100).toFixed(1)}%</p>
+              </div>
+            </>
+          );
+          return (
+            <li key={p.label}>
+              {picking ? (
+                <button
+                  type="button"
+                  onClick={() => onPick(i)}
+                  aria-pressed={activeColour === i}
+                  className={cn(
+                    "flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+                    activeColour === i && "border-blue-600 ring-1 ring-blue-600",
+                  )}
+                >
+                  {body}
+                </button>
+              ) : (
+                <div className="flex items-center gap-3 rounded-lg border px-3 py-2">{body}</div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 

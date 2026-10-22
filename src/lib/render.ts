@@ -7,6 +7,8 @@ export interface RenderOptions {
   highlightFloats: boolean;
   /** Device pixel ratio for crisp output. */
   scale?: number;
+  /** Cell indices to outline as selected. */
+  selected?: ReadonlySet<number>;
 }
 
 const FONT = "ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif";
@@ -99,6 +101,22 @@ export function drawChart(canvas: HTMLCanvasElement, chart: Chart, opts: RenderO
       const w = (f.gridColEnd - f.gridColStart + 1) * cw;
       ctx.fillRect(x, y, w, ch);
       ctx.strokeRect(x + ctx.lineWidth / 2, y + ctx.lineWidth / 2, w - ctx.lineWidth, ch - ctx.lineWidth);
+    }
+  }
+
+  if (opts.selected?.size) {
+    const lw = Math.max(1.5, Math.min(3, cw * 0.15));
+    const cells = [...opts.selected].filter((i) => i >= 0 && i < W * H);
+    // Light tint first, then outlines in two passes so neighbouring cells don't paint over each other's white halo.
+    ctx.fillStyle = "rgba(37,99,235,0.25)";
+    for (const i of cells) ctx.fillRect(left + (i % W) * cw, top + Math.floor(i / W) * ch, cw, ch);
+    for (const [width, colour] of [
+      [lw * 2, "#ffffff"],
+      [lw, "#2563eb"],
+    ] as const) {
+      ctx.lineWidth = width;
+      ctx.strokeStyle = colour;
+      for (const i of cells) ctx.strokeRect(left + (i % W) * cw, top + Math.floor(i / W) * ch, cw, ch);
     }
   }
 

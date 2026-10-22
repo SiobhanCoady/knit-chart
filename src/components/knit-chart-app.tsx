@@ -10,6 +10,7 @@ import {
   chartRows,
   DEFAULT_SETTINGS,
   MAX_ROWS,
+  recolourCells,
 } from "@/lib/chart";
 import { exportPdf, exportPng } from "@/lib/export";
 import { Button } from "@/components/ui/button";
@@ -84,6 +85,9 @@ export function KnitChartApp() {
   const [effectiveCell, setEffectiveCell] = useState(12);
   const [gauge, setGauge] = useState({ sts: "22", rows: "28" });
   const [exporting, setExporting] = useState<"png" | "pdf" | null>(null);
+  const [selectedCells, setSelectedCells] = useState<ReadonlySet<number>>(() => new Set());
+  const [editedStitches, setEditedStitches] = useState(0);
+  const [panelTab, setPanelTab] = useState("key");
   const urlRef = useRef<string | null>(null);
 
   const update = <K extends keyof ChartSettings>(key: K, value: ChartSettings[K]) =>
@@ -129,6 +133,8 @@ export function KnitChartApp() {
     const t = setTimeout(() => {
       try {
         setChart(buildChart(image.el, settings));
+        setSelectedCells(new Set());
+        setEditedStitches(0);
         setError(null);
       } catch (e) {
         console.error(e);
@@ -144,6 +150,33 @@ export function KnitChartApp() {
   useEffect(() => () => {
     if (urlRef.current) URL.revokeObjectURL(urlRef.current);
   }, []);
+
+  const hasSelection = selectedCells.size > 0;
+  useEffect(() => {
+    if (!hasSelection) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setSelectedCells(new Set());
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [hasSelection]);
+
+  const selectCells = useCallback((indices: ReadonlySet<number>) => {
+    setSelectedCells(indices);
+    if (indices.size) setPanelTab("key");
+  }, []);
+
+  const applyColour = (colour: number) => {
+    if (!chart) return;
+    const result = recolourCells(chart, selectedCells, colour);
+    if (!result.changed) return;
+    setChart(result.chart);
+    setEditedStitches((n) => n + result.changed);
+  };
+
+  let sharedColour: number | null = null;
+  if (chart && hasSelection) {
+    const colours = new Set([...selectedCells].map((i) => chart.cells[i]));
+    if (colours.size === 1) [sharedColour] = colours;
+  }
 
   const applyGauge = (next: { sts: string; rows: string }) => {
     setGauge(next);
@@ -402,6 +435,11 @@ export function KnitChartApp() {
                   <Badge variant={chart.floats.length ? "destructive" : "secondary"} data-testid="float-count">
                     {chart.floats.length} long float{chart.floats.length === 1 ? "" : "s"}
                   </Badge>
+                  {editedStitches > 0 && (
+                    <Badge variant="outline" title="Changing the picture or chart settings rebuilds the chart and discards edits.">
+                      {editedStitches} stitch{editedStitches === 1 ? "" : "es"} edited
+                    </Badge>
+                  )}
                 </>
               )}
               {processing && <Loader2 className="size-4 animate-spin text-muted-foreground" aria-label="Updating chart" />}
@@ -450,6 +488,8 @@ export function KnitChartApp() {
                   showSymbols={showSymbols}
                   highlightFloats={highlightFloats}
                   onCellChange={setEffectiveCell}
+                  selected={selectedCells}
+                  onSelect={selectCells}
                 />
               </div>
             ) : (
@@ -463,7 +503,7 @@ export function KnitChartApp() {
         {chart && (
           <Card>
             <CardContent>
-              <Tabs defaultValue="key">
+              <Tabs value={panelTab} onValueChange={(v) => setPanelTab(v as string)}>
                 <TabsList>
                   <TabsTrigger value="key">Colour key</TabsTrigger>
                   <TabsTrigger value="floats">
@@ -475,7 +515,12 @@ export function KnitChartApp() {
                   <TabsTrigger value="rows">Colours per row</TabsTrigger>
                 </TabsList>
                 <TabsContent value="key" className="pt-3">
-                  <ColourKey chart={chart} />
+                  <ColourKey
+                    chart={chart}
+                    selectedCount={selectedCells.size}
+                    activeColour={sharedColour}
+                    onPick={applyColour}
+                  />
                 </TabsContent>
                 <TabsContent value="floats" className="pt-3">
                   <FloatList chart={chart} />
