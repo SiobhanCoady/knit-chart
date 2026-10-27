@@ -11,7 +11,7 @@ function download(url: string, filename: string) {
 }
 
 export function exportPng(chart: Chart, opts: { showSymbols: boolean; highlightFloats: boolean }, name: string) {
-  const canvas = drawChartWithKey(chart, { cell: 16, scale: 2, ...opts });
+  const canvas = drawChartWithKey(chart, { cell: 16, scale: 2, numberEvery: true, ...opts });
   canvas.toBlob((blob) => {
     if (!blob) return;
     const url = URL.createObjectURL(blob);
@@ -27,7 +27,7 @@ export async function exportPdf(
 ) {
   const { jsPDF } = await import("jspdf");
   const canvas = document.createElement("canvas");
-  drawChart(canvas, chart, { cell: 16, scale: 2, ...opts });
+  drawChart(canvas, chart, { cell: 16, scale: 2, numberEvery: true, ...opts });
   const landscape = canvas.width > canvas.height;
   const doc = new jsPDF({ orientation: landscape ? "landscape" : "portrait", unit: "mm", format: "a4" });
   const pw = doc.internal.pageSize.getWidth();

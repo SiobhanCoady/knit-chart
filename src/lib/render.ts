@@ -9,7 +9,11 @@ export interface RenderOptions {
   scale?: number;
   /** Cell indices to outline as selected. */
   selected?: ReadonlySet<number>;
+  /** Number every row and stitch, shrinking the labels to fit, instead of thinning them out when cells are small. */
+  numberEvery?: boolean;
 }
+
+const MIN_LABEL = 6;
 
 const FONT = "ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif";
 
@@ -121,9 +125,17 @@ export function drawChart(canvas: HTMLCanvasElement, chart: Chart, opts: RenderO
   }
 
   ctx.fillStyle = "#3f3f46";
-  ctx.font = `${L.label}px ${FONT}`;
+  let rowFont = L.label;
+  let colFont = L.label;
+  if (opts.numberEvery) {
+    rowFont = Math.max(MIN_LABEL, Math.min(L.label, ch * 0.85));
+    ctx.font = `${L.label}px ${FONT}`;
+    const widest = ctx.measureText(String(W)).width;
+    colFont = Math.max(MIN_LABEL, Math.min(L.label, (L.label * cw * 0.9) / widest));
+  }
+  ctx.font = `${rowFont}px ${FONT}`;
   ctx.textBaseline = "middle";
-  const rowStep = ch >= L.label * 1.1 ? 1 : ch * 5 >= L.label * 1.1 ? 5 : 10;
+  const rowStep = opts.numberEvery || ch >= L.label * 1.1 ? 1 : ch * 5 >= L.label * 1.1 ? 5 : 10;
   for (let y = 0; y < H; y++) {
     const row = H - y;
     if (row % rowStep !== 0 && row !== 1) continue;
@@ -133,7 +145,8 @@ export function drawChart(canvas: HTMLCanvasElement, chart: Chart, opts: RenderO
     ctx.textAlign = "right";
     ctx.fillText(String(row), left - 6, cy);
   }
-  const colStep = cw >= L.label * 1.6 ? 1 : cw * 5 >= L.label * 1.6 ? 5 : 10;
+  const colStep = opts.numberEvery || cw >= L.label * 1.6 ? 1 : cw * 5 >= L.label * 1.6 ? 5 : 10;
+  ctx.font = `${colFont}px ${FONT}`;
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
   for (let x = 0; x < W; x++) {
@@ -141,6 +154,7 @@ export function drawChart(canvas: HTMLCanvasElement, chart: Chart, opts: RenderO
     if (st % colStep !== 0 && st !== 1) continue;
     ctx.fillText(String(st), left + x * cw + cw / 2, top + H * ch + 6);
   }
+  ctx.font = `${L.label}px ${FONT}`;
   ctx.textBaseline = "bottom";
   ctx.textAlign = "right";
   ctx.fillStyle = "#71717a";
@@ -278,8 +292,21 @@ export function drawChartWithKey(chart: Chart, opts: RenderOptions): HTMLCanvasE
   const keyRow = 26;
   const cols = Math.max(1, Math.floor((chartCanvas.width - pad) / 220));
   const keyRows = Math.ceil(chart.palette.length / cols);
-  const extra = 40 + keyRows * keyRow + 12 + (chart.settings.mode === "stranded" ? 20 : 0);
   const width = Math.max(chartCanvas.width + pad * 2, 480);
+
+  const noteFont = `12px ${FONT}`;
+  const noteLineHeight = 16;
+  const measure = document.createElement("canvas").getContext("2d")!;
+  measure.font = noteFont;
+  const notes = [
+    "Read RS rows right → left from row 1 (bottom).",
+    `Long floats (> ${chart.settings.maxFloat} sts): ${chart.floats.length}`,
+  ];
+  const noteLines =
+    measure.measureText(notes.join(" ")).width <= width - pad * 2 ? [notes.join(" ")] : notes;
+
+  const headerHeight = 20 + noteLines.length * noteLineHeight + 8;
+  const extra = 20 + headerHeight + keyRows * keyRow + 12 + (chart.settings.mode === "stranded" ? 20 : 0);
   const height = chartCanvas.height + pad * 2 + extra;
 
   const out = document.createElement("canvas");
@@ -300,16 +327,10 @@ export function drawChartWithKey(chart: Chart, opts: RenderOptions): HTMLCanvasE
   ctx.textBaseline = "top";
   ctx.textAlign = "left";
   ctx.fillText("Colour key", pad, y);
-  ctx.font = `12px ${FONT}`;
+  ctx.font = noteFont;
   ctx.fillStyle = "#71717a";
-  ctx.textAlign = "right";
-  ctx.fillText(
-    `Read RS rows right → left from row 1 (bottom). Long floats (> ${chart.settings.maxFloat} sts): ${chart.floats.length}`,
-    width - pad,
-    y + 2,
-  );
-  ctx.textAlign = "left";
-  y += 24;
+  noteLines.forEach((line, i) => ctx.fillText(line, pad, y + 20 + i * noteLineHeight));
+  y += headerHeight;
   const colW = (width - pad * 2) / cols;
   chart.palette.forEach((p, i) => {
     const cx = pad + (i % cols) * colW;
