@@ -41,6 +41,7 @@ import { ACCEPTED_TYPES, MAX_FILE_BYTES, UploadZone } from "@/components/upload-
 import { CropEditor } from "@/components/crop-editor";
 import { ChartView, MAX_CELL, MIN_CELL } from "@/components/chart-view";
 import { ColourKey, FloatList, RowSummaryList } from "@/components/chart-panels";
+import { RepeatPreview } from "@/components/repeat-preview";
 
 interface LoadedImage {
   el: HTMLImageElement;
@@ -684,6 +685,8 @@ export function KnitChartApp() {
             </CardContent>
           </Card>
         )}
+
+        {chart && <RepeatPreview chart={chart} />}
       </section>
     </div>
   );

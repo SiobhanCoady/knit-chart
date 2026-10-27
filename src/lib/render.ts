@@ -1,4 +1,4 @@
-import { type Chart, luminance } from "./chart";
+import { type Chart, luminance, type RGB, type SeamFloat } from "./chart";
 
 export interface RenderOptions {
   /** Cell width in CSS pixels; height follows the stitch aspect. */
@@ -145,6 +145,128 @@ export function drawChart(canvas: HTMLCanvasElement, chart: Chart, opts: RenderO
   ctx.textAlign = "right";
   ctx.fillStyle = "#71717a";
   ctx.fillText(`${W} sts × ${H} rows`, left + W * cw, top - 4);
+}
+
+export interface RepeatOptions {
+  across: number;
+  up: number;
+  /** Stitch width in CSS pixels. */
+  cell: number;
+  knitted: boolean;
+  /** Dashed lines between repeats, plus outlines on floats that cross a join. */
+  showJoins: boolean;
+  seamFloats?: SeamFloat[];
+  scale?: number;
+}
+
+export function repeatLayout(chart: Chart, across: number, up: number, cell: number) {
+  const cw = cell;
+  const ch = cell * chart.settings.stitchAspect;
+  return { cw, ch, width: cw * chart.width * across, height: ch * chart.height * up };
+}
+
+const mix = (a: RGB, b: RGB, t: number) =>
+  `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * t)).join(",")})`;
+
+/** One knit stitch: two slanted legs forming a V, extending a little above and below its cell like real fabric. */
+function stitchSprite(rgb: RGB, cw: number, ch: number, scale: number) {
+  const overhang = ch * 0.18;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.ceil(cw * scale));
+  canvas.height = Math.max(1, Math.ceil((ch + overhang * 2) * scale));
+  const ctx = canvas.getContext("2d")!;
+  ctx.scale(scale, scale);
+  const midY = overhang + ch / 2;
+  const grad = ctx.createLinearGradient(0, overhang, 0, overhang + ch);
+  grad.addColorStop(0, mix(rgb, [255, 255, 255], 0.22));
+  grad.addColorStop(0.45, `rgb(${rgb.join(",")})`);
+  grad.addColorStop(1, mix(rgb, [0, 0, 0], 0.28));
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.ellipse(cw / 2 + side * cw * 0.22, midY, cw * 0.25, (ch + overhang) * 0.52, side * 0.5, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.lineWidth = Math.max(0.4, cw * 0.04);
+    ctx.strokeStyle = mix(rgb, [0, 0, 0], 0.45);
+    ctx.stroke();
+  }
+  return { canvas, overhang };
+}
+
+/** Tile the chart `across` × `up` times, either as knitted fabric or flat colour blocks. */
+export function drawRepeatPreview(canvas: HTMLCanvasElement, chart: Chart, opts: RepeatOptions) {
+  const scale = opts.scale ?? 1;
+  const L = repeatLayout(chart, opts.across, opts.up, opts.cell);
+  const { cw, ch } = L;
+  canvas.width = Math.ceil(L.width * scale);
+  canvas.height = Math.ceil(L.height * scale);
+  const ctx = canvas.getContext("2d")!;
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  const W = chart.width;
+  const H = chart.height;
+  const cols = W * opts.across;
+  const rows = H * opts.up;
+  const colourAt = (x: number, y: number) => chart.cells[(y % H) * W + (x % W)];
+
+  if (opts.knitted) {
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        ctx.fillStyle = mix(chart.palette[colourAt(x, y)].rgb, [0, 0, 0], 0.5);
+        ctx.fillRect(x * cw, y * ch, cw + 0.5, ch + 0.5);
+      }
+    }
+    const sprites = chart.palette.map((p) => stitchSprite(p.rgb, cw, ch, scale));
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        const s = sprites[colourAt(x, y)];
+        ctx.drawImage(s.canvas, x * cw, y * ch - s.overhang, cw, ch + s.overhang * 2);
+      }
+    }
+  } else {
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        ctx.fillStyle = chart.palette[colourAt(x, y)].hex;
+        ctx.fillRect(x * cw, y * ch, cw + 0.5, ch + 0.5);
+      }
+    }
+  }
+
+  if (!opts.showJoins) return;
+  ctx.save();
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([6, 4]);
+  for (const [colour, offset] of [
+    ["rgba(255,255,255,0.9)", 0],
+    ["rgba(0,0,0,0.6)", 5],
+  ] as const) {
+    ctx.strokeStyle = colour;
+    ctx.lineDashOffset = offset;
+    ctx.beginPath();
+    for (let i = 1; i < opts.across; i++) {
+      ctx.moveTo(i * W * cw, 0);
+      ctx.lineTo(i * W * cw, L.height);
+    }
+    for (let i = 1; i < opts.up; i++) {
+      ctx.moveTo(0, i * H * ch);
+      ctx.lineTo(L.width, i * H * ch);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  if (!opts.seamFloats?.length || opts.across < 2) return;
+  ctx.strokeStyle = "#e11d48";
+  ctx.lineWidth = Math.max(1.5, cw * 0.15);
+  for (const f of opts.seamFloats) {
+    const gridRow = H - f.row;
+    for (let r = 0; r < opts.up; r++) {
+      const y = (r * H + gridRow) * ch;
+      for (let i = 1; i < opts.across; i++) {
+        const x = (i * W - f.rightRun) * cw;
+        ctx.strokeRect(x, y, f.length * cw, ch);
+      }
+    }
+  }
 }
 
 /** Render the chart plus a colour key underneath, for PNG export. */

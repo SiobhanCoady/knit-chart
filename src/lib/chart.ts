@@ -378,6 +378,40 @@ function summariseChart(
   return { width, height, cells, palette, rows, floats, remappedStitches, settings };
 }
 
+export interface SeamFloat {
+  /** Row number in knitting convention: 1 = bottom row. */
+  row: number;
+  /** Stitches of the run at the end of one repeat plus the start of the next. */
+  length: number;
+  colour: number;
+  /** Run lengths at the left and right edges of the chart, for drawing. */
+  leftRun: number;
+  rightRun: number;
+}
+
+/**
+ * Floats that only exist once the chart is worked as a repeat: when a row starts and ends in the same colour,
+ * the run at the end of one repeat carries straight on into the start of the next.
+ */
+export function findSeamFloats(chart: Chart): SeamFloat[] {
+  const { width: W, height: H, cells } = chart;
+  const out: SeamFloat[] = [];
+  for (let y = 0; y < H; y++) {
+    const base = y * W;
+    const colour = cells[base];
+    if (cells[base + W - 1] !== colour) continue;
+    let leftRun = 0;
+    while (leftRun < W && cells[base + leftRun] === colour) leftRun++;
+    if (leftRun === W) continue;
+    let rightRun = 0;
+    while (cells[base + W - 1 - rightRun] === colour) rightRun++;
+    if (leftRun + rightRun > chart.settings.maxFloat) {
+      out.push({ row: H - y, length: leftRun + rightRun, colour, leftRun, rightRun });
+    }
+  }
+  return out;
+}
+
 /**
  * A float is the strand of an unused colour carried across the back while another colour is worked.
  * It gets too long when one colour runs for more than `maxFloat` stitches in a row that also uses
