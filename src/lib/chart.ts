@@ -290,6 +290,19 @@ export function resizeChart(chart: Chart, width: number, height: number): Chart 
   return summariseChart(width, height, cells, chart.palette, { ...chart.settings, stitches: width }, chart.remappedStitches);
 }
 
+/** Rebuild a chart from its stored stitches and colours; counts, floats and rows are recomputed. */
+export function restoreChart(
+  width: number,
+  height: number,
+  cells: Uint8Array,
+  colours: Pick<PaletteEntry, "rgb" | "symbol" | "label">[],
+  settings: ChartSettings,
+  remappedStitches: number,
+): Chart {
+  const palette = colours.map((p) => ({ ...p, hex: toHex(p.rgb), count: 0 }));
+  return summariseChart(width, height, cells, palette, settings, remappedStitches);
+}
+
 /** Re-check floats and redraw at a new stitch shape without touching any stitches. */
 export function applyChartSettings(chart: Chart, changes: Pick<ChartSettings, "maxFloat" | "stitchAspect">): Chart {
   if (chart.settings.maxFloat === changes.maxFloat && chart.settings.stitchAspect === changes.stitchAspect) return chart;

@@ -1,4 +1,5 @@
 import { type Chart } from "./chart";
+import { exportFileName } from "./designs";
 import { drawChart, drawChartWithKey } from "./render";
 
 function download(url: string, filename: string) {
@@ -10,12 +11,12 @@ function download(url: string, filename: string) {
   a.remove();
 }
 
-export function exportPng(chart: Chart, opts: { showSymbols: boolean; highlightFloats: boolean }, name: string) {
-  const canvas = drawChartWithKey(chart, { cell: 16, scale: 2, numberEvery: true, ...opts });
+export function exportPng(chart: Chart, opts: { showSymbols: boolean; highlightFloats: boolean }, title: string) {
+  const canvas = drawChartWithKey(chart, { cell: 16, scale: 2, numberEvery: true, ...opts }, title);
   canvas.toBlob((blob) => {
     if (!blob) return;
     const url = URL.createObjectURL(blob);
-    download(url, `${name}.png`);
+    download(url, `${exportFileName(title)}.png`);
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   }, "image/png");
 }
@@ -23,7 +24,7 @@ export function exportPng(chart: Chart, opts: { showSymbols: boolean; highlightF
 export async function exportPdf(
   chart: Chart,
   opts: { showSymbols: boolean; highlightFloats: boolean },
-  name: string,
+  title: string,
 ) {
   const { jsPDF } = await import("jspdf");
   const canvas = document.createElement("canvas");
@@ -36,7 +37,7 @@ export async function exportPdf(
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(14);
-  doc.text(name, m, m + 2);
+  doc.text(doc.splitTextToSize(title, pw - m * 2)[0], m, m + 2);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   const s = chart.settings;
@@ -121,5 +122,5 @@ export async function exportPdf(
     if (col === 0) y += 4.6;
   }
 
-  doc.save(`${name}.pdf`);
+  doc.save(`${exportFileName(title)}.pdf`);
 }

@@ -284,11 +284,13 @@ export function drawRepeatPreview(canvas: HTMLCanvasElement, chart: Chart, opts:
 }
 
 /** Render the chart plus a colour key underneath, for PNG export. */
-export function drawChartWithKey(chart: Chart, opts: RenderOptions): HTMLCanvasElement {
+export function drawChartWithKey(chart: Chart, opts: RenderOptions, title?: string): HTMLCanvasElement {
   const chartCanvas = document.createElement("canvas");
   drawChart(chartCanvas, chart, { ...opts, scale: 1 });
   const scale = opts.scale ?? 2;
   const pad = 24;
+  const titleFont = `600 20px ${FONT}`;
+  const titleHeight = title ? 34 : 0;
   const keyRow = 26;
   const cols = Math.max(1, Math.floor((chartCanvas.width - pad) / 220));
   const keyRows = Math.ceil(chart.palette.length / cols);
@@ -307,7 +309,7 @@ export function drawChartWithKey(chart: Chart, opts: RenderOptions): HTMLCanvasE
 
   const headerHeight = 20 + noteLines.length * noteLineHeight + 8;
   const extra = 20 + headerHeight + keyRows * keyRow + 12 + (chart.settings.mode === "stranded" ? 20 : 0);
-  const height = chartCanvas.height + pad * 2 + extra;
+  const height = titleHeight + chartCanvas.height + pad * 2 + extra;
 
   const out = document.createElement("canvas");
   out.width = width * scale;
@@ -319,10 +321,19 @@ export function drawChartWithKey(chart: Chart, opts: RenderOptions): HTMLCanvasE
   // Re-render at the export scale rather than upscaling the 1x bitmap.
   const hi = document.createElement("canvas");
   drawChart(hi, chart, { ...opts, scale });
-  ctx.drawImage(hi, pad, pad, chartCanvas.width, chartCanvas.height);
+  ctx.drawImage(hi, pad, pad + titleHeight, chartCanvas.width, chartCanvas.height);
 
-  let y = pad + chartCanvas.height + 20;
   ctx.fillStyle = "#18181b";
+  if (title) {
+    ctx.font = titleFont;
+    ctx.textBaseline = "top";
+    ctx.textAlign = "left";
+    let text = title;
+    while (text.length > 1 && ctx.measureText(text).width > width - pad * 2) text = text.slice(0, -2) + "…";
+    ctx.fillText(text, pad, pad);
+  }
+
+  let y = pad + titleHeight + chartCanvas.height + 20;
   ctx.font = `600 14px ${FONT}`;
   ctx.textBaseline = "top";
   ctx.textAlign = "left";

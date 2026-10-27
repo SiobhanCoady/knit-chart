@@ -4,6 +4,7 @@ import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } fro
 import { toast } from "sonner";
 import {
   ArrowLeft,
+  Check,
   Crop,
   Download,
   FileText,
@@ -34,6 +35,15 @@ import {
   type RGB,
   setPaletteColour,
 } from "@/lib/chart";
+import {
+  deleteDesign,
+  designFromChart,
+  designToChart,
+  listDesigns,
+  saveDesign,
+  type SavedDesign,
+  UNTITLED,
+} from "@/lib/designs";
 import { exportPdf, exportPng } from "@/lib/export";
 import { addRotation, type Rotation, rotateCrop, rotatedImageUrl } from "@/lib/rotate";
 import { Button } from "@/components/ui/button";
@@ -50,6 +60,7 @@ import { ChartView, MAX_CELL, MIN_CELL } from "@/components/chart-view";
 import { ColourKey, FloatList, RowSummaryList } from "@/components/chart-panels";
 import { RepeatPreview } from "@/components/repeat-preview";
 import { SizeForm } from "@/components/size-form";
+import { SavedDesigns } from "@/components/saved-designs";
 
 interface LoadedImage {
   el: HTMLImageElement;
@@ -67,8 +78,18 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
-function baseName(name: string) {
-  return (name.replace(/\.[^.]+$/, "").replace(/[^\w-]+/g, "-").replace(/^-+|-+$/g, "") || "chart") + "-chart";
+function nameFromFile(fileName: string) {
+  return fileName.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").trim();
+}
+
+interface DesignMeta {
+  id: string;
+  createdAt: number;
+  source: SavedDesign["source"];
+}
+
+function newDesign(source: SavedDesign["source"]): DesignMeta {
+  return { id: crypto.randomUUID(), createdAt: Date.now(), source };
 }
 
 function SettingRow({
@@ -119,6 +140,12 @@ export function KnitChartApp() {
   const [panelTab, setPanelTab] = useState("key");
   const [rotation, setRotation] = useState<Rotation>(0);
   const [rotating, setRotating] = useState(false);
+  const [design, setDesign] = useState<DesignMeta | null>(null);
+  const [name, setName] = useState("");
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [savedDesigns, setSavedDesigns] = useState<SavedDesign[]>([]);
+  const persistedRef = useRef(new Set<string>());
+  const lastSavedRef = useRef<{ chart: Chart | null; name: string }>({ chart: null, name: "" });
   const urlRef = useRef<string | null>(null);
   const rotatedUrlRef = useRef<string | null>(null);
   const originalRef = useRef<LoadedImage | null>(null);
@@ -143,20 +170,94 @@ export function KnitChartApp() {
     setPanelTab("key");
   };
 
+  const beginDesign = (meta: DesignMeta, designName: string) => {
+    setDesign(meta);
+    setName(designName);
+    setSavedAt(null);
+  };
+
   const startBlank = (width: number, height: number) => {
     setImage(null);
     setBlank(true);
     setError(null);
+    beginDesign(newDesign("blank"), "");
     resetEditing(createBlankChart(width, height, settings));
   };
 
-  const startOver = () => {
-    if (history.past.length && !window.confirm("Start a new chart? Your current chart and its edits will be lost.")) return;
+  // An untouched blank grid isn't worth keeping; anything named, edited or built from a picture is.
+  const saveCurrent = async () => {
+    if (!chart || !design || processing) return;
+    const worthSaving =
+      persistedRef.current.has(design.id) || design.source === "picture" || !!name.trim() || history.past.length > 0;
+    if (!worthSaving) return;
+    if (lastSavedRef.current.chart === chart && lastSavedRef.current.name === name) return;
+    try {
+      await saveDesign(designFromChart(chart, { ...design, name: name.trim() || UNTITLED }));
+      persistedRef.current.add(design.id);
+      lastSavedRef.current = { chart, name };
+      setSavedAt(Date.now());
+    } catch (e) {
+      console.error(e);
+      toast.error("Couldn't save this design in your browser. Export a PNG or PDF to keep a copy.", {
+        id: "save-failed",
+      });
+    }
+  };
+
+  const startOver = async () => {
+    await saveCurrent();
     setImage(null);
     setBlank(false);
     setError(null);
+    setDesign(null);
     resetEditing(null);
   };
+
+  const openDesign = (saved: SavedDesign) => {
+    setImage(null);
+    setBlank(true);
+    setError(null);
+    setSettings({ ...DEFAULT_SETTINGS, ...saved.settings, crop: null });
+    const restored = designToChart(saved);
+    const savedName = saved.name === UNTITLED ? "" : saved.name;
+    persistedRef.current.add(saved.id);
+    lastSavedRef.current = { chart: restored, name: savedName };
+    beginDesign({ id: saved.id, createdAt: saved.createdAt, source: saved.source }, savedName);
+    setSavedAt(saved.updatedAt);
+    resetEditing(restored);
+  };
+
+  const removeDesign = async (saved: SavedDesign) => {
+    setSavedDesigns((list) => list.filter((d) => d.id !== saved.id));
+    try {
+      await deleteDesign(saved.id);
+      toast(`Deleted “${saved.name}”`, {
+        action: {
+          label: "Undo",
+          onClick: async () => {
+            await saveDesign(saved);
+            setSavedDesigns(await listDesigns());
+          },
+        },
+      });
+    } catch (e) {
+      console.error(e);
+      toast.error("Couldn't delete that design.");
+      setSavedDesigns(await listDesigns());
+    }
+  };
+
+  const onHome = !image && !blank;
+  useEffect(() => {
+    if (!onHome) return;
+    let cancelled = false;
+    listDesigns()
+      .then((list) => !cancelled && setSavedDesigns(list))
+      .catch((e) => console.error("Couldn't read saved designs", e));
+    return () => {
+      cancelled = true;
+    };
+  }, [onHome]);
 
   const setRotatedUrl = (url: string | null) => {
     if (rotatedUrlRef.current) URL.revokeObjectURL(rotatedUrlRef.current);
@@ -172,6 +273,9 @@ export function KnitChartApp() {
       urlRef.current = revoke ? url : null;
       setRotatedUrl(null);
       originalRef.current = { el, url, name };
+      setDesign(newDesign("picture"));
+      setName(nameFromFile(name));
+      setSavedAt(null);
       setBlank(false);
       setImage(originalRef.current);
       setRotation(0);
@@ -250,6 +354,15 @@ export function KnitChartApp() {
     return () => clearTimeout(t);
   }, [image, settings]);
   const processing = !!image && (builtFor?.image !== image || builtFor.settings !== settings);
+
+  const onAutosave = useEffectEvent(() => {
+    saveCurrent();
+  });
+  useEffect(() => {
+    if (!chart || !design || processing) return;
+    const t = setTimeout(onAutosave, 500);
+    return () => clearTimeout(t);
+  }, [chart, name, design, processing]);
 
   useEffect(() => () => {
     if (urlRef.current) URL.revokeObjectURL(urlRef.current);
@@ -346,9 +459,9 @@ export function KnitChartApp() {
     if (!chart) return;
     setExporting(kind);
     try {
-      const name = image ? baseName(image.name) : `knit-chart-${chart.width}x${chart.height}`;
-      if (kind === "png") exportPng(chart, { showSymbols, highlightFloats }, name);
-      else await exportPdf(chart, { showSymbols, highlightFloats }, name);
+      const title = name.trim() || UNTITLED;
+      if (kind === "png") exportPng(chart, { showSymbols, highlightFloats }, title);
+      else await exportPdf(chart, { showSymbols, highlightFloats }, title);
       toast.success(kind === "png" ? "Chart PNG downloaded" : "Printable PDF downloaded");
     } catch (e) {
       console.error(e);
@@ -370,7 +483,7 @@ export function KnitChartApp() {
         settings.stitchAspect,
     ) > MAX_ROWS;
 
-  if (!image && !blank) {
+  if (onHome) {
     return (
       <div className="mx-auto w-full max-w-5xl space-y-6">
         <div className="space-y-3 text-center">
@@ -414,6 +527,9 @@ export function KnitChartApp() {
           </p>
         )}
         {error && <ErrorNote message={error} onDismiss={() => setError(null)} />}
+        {savedDesigns.length > 0 && (
+          <SavedDesigns designs={savedDesigns} onOpen={openDesign} onDelete={removeDesign} />
+        )}
         <ul className="grid gap-3 text-sm sm:grid-cols-3">
           {[
             ["Colours per row", "Stranded mode keeps every row to 2 (or 3) colours, recolouring stray stitches."],
@@ -642,7 +758,7 @@ export function KnitChartApp() {
             <>
               <Card>
                 <CardHeader>
-                  <CardTitle>Blank chart</CardTitle>
+                  <CardTitle>Chart size</CardTitle>
                   <CardDescription>
                     {chart.width} sts × {chart.height} rows
                   </CardDescription>
@@ -681,8 +797,23 @@ export function KnitChartApp() {
         {error && <ErrorNote message={error} onDismiss={() => setError(null)} />}
         <Card>
           <CardHeader>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder={UNTITLED}
+                maxLength={80}
+                aria-label="Design name"
+                className="h-9 w-full max-w-sm text-lg font-semibold md:text-lg"
+              />
+              {savedAt && (
+                <span className="flex items-center gap-1 text-xs text-muted-foreground" data-testid="saved-status">
+                  <Check className="size-3.5" />
+                  Saved in this browser
+                </span>
+              )}
+            </div>
             <CardTitle className="flex flex-wrap items-center gap-2">
-              Your chart
               {chart && (
                 <>
                   <Badge variant="secondary">
