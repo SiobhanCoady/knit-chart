@@ -62,7 +62,10 @@ export interface Chart {
   settings: ChartSettings;
 }
 
-export const SYMBOLS = ["", "×", "●", "○", "▲", "■", "◆", "+", "/", "★", "▼", "♥"];
+export const SYMBOLS = ["", "×", "●", "○", "▲", "■", "◆", "+", "/", "★", "▼", "♥", "□", "△", "◇", "◐"];
+
+/** Every colour needs its own symbol so the chart still reads in black and white. */
+export const MAX_PALETTE = SYMBOLS.length;
 
 export const DEFAULT_SETTINGS: ChartSettings = {
   stitches: 60,
@@ -239,6 +242,35 @@ export function luminance([r, g, b]: RGB): number {
   return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
 }
 
+/** Parse "#RGB" or "#RRGGBB", with or without the leading #. */
+export function parseHex(input: string): RGB | null {
+  let s = input.trim().replace(/^#/, "");
+  if (/^[0-9a-f]{3}$/i.test(s)) s = s.replace(/./g, (c) => c + c);
+  if (!/^[0-9a-f]{6}$/i.test(s)) return null;
+  return [0, 2, 4].map((i) => parseInt(s.slice(i, i + 2), 16)) as RGB;
+}
+
+/** Change what a palette colour looks like. Every stitch using it changes with it; floats and counts don't. */
+export function setPaletteColour(chart: Chart, index: number, rgb: RGB): Chart {
+  const hex = toHex(rgb);
+  if (chart.palette[index]?.hex === hex) return chart;
+  return { ...chart, palette: chart.palette.map((p, i) => (i === index ? { ...p, rgb, hex } : p)) };
+}
+
+/** Add an unused colour to the end of the palette, with the next free letter and symbol. */
+export function addPaletteColour(chart: Chart, rgb: RGB): Chart {
+  const i = chart.palette.length;
+  if (i >= MAX_PALETTE) return chart;
+  const entry: PaletteEntry = {
+    rgb,
+    hex: toHex(rgb),
+    symbol: SYMBOLS[i],
+    label: String.fromCharCode(65 + i),
+    count: 0,
+  };
+  return { ...chart, palette: [...chart.palette, entry] };
+}
+
 export function buildChart(
   image: CanvasImageSource & { width: number; height: number },
   settings: ChartSettings,
@@ -285,7 +317,7 @@ export function buildChart(
   const palette: PaletteEntry[] = order.map((old, i) => ({
     rgb: rawPalette[old],
     hex: toHex(rawPalette[old]),
-    symbol: SYMBOLS[i % SYMBOLS.length],
+    symbol: SYMBOLS[i],
     label: String.fromCharCode(65 + i),
     count: usage[old],
   }));

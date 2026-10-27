@@ -22,7 +22,10 @@ import {
   chartRows,
   DEFAULT_SETTINGS,
   MAX_ROWS,
+  addPaletteColour,
   recolourCells,
+  type RGB,
+  setPaletteColour,
 } from "@/lib/chart";
 import { exportPdf, exportPng } from "@/lib/export";
 import { addRotation, type Rotation, rotateCrop, rotatedImageUrl } from "@/lib/rotate";
@@ -223,12 +226,22 @@ export function KnitChartApp() {
     if (indices.size) setPanelTab("key");
   }, []);
 
-  const applyColour = (colour: number) => {
-    if (!chart) return;
-    const result = recolourCells(chart, selectedCells, colour);
-    if (!result.changed) return;
+  const commitEdit = (next: Chart) => {
+    if (!chart || next === chart) return;
     setHistory((h) => ({ past: [...h.past, chart].slice(-MAX_UNDO), future: [] }));
-    setChart(result.chart);
+    setChart(next);
+  };
+
+  const applyColour = (colour: number) => {
+    if (chart) commitEdit(recolourCells(chart, selectedCells, colour).chart);
+  };
+
+  const changePaletteColour = (index: number, rgb: RGB) => {
+    if (chart) commitEdit(setPaletteColour(chart, index, rgb));
+  };
+
+  const addColour = (rgb: RGB) => {
+    if (chart) commitEdit(addPaletteColour(chart, rgb));
   };
 
   const undo = () => {
@@ -657,6 +670,8 @@ export function KnitChartApp() {
                     selectedCount={selectedCells.size}
                     activeColour={sharedColour}
                     onPick={applyColour}
+                    onChangeColour={changePaletteColour}
+                    onAddColour={addColour}
                   />
                 </TabsContent>
                 <TabsContent value="floats" className="pt-3">

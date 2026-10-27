@@ -1,9 +1,14 @@
 "use client";
 
-import { AlertTriangle, CheckCircle2 } from "lucide-react";
-import { type Chart, luminance, type PaletteEntry } from "@/lib/chart";
+import { useState } from "react";
+import { AlertTriangle, CheckCircle2, Pencil, Plus } from "lucide-react";
+import { type Chart, luminance, MAX_PALETTE, type PaletteEntry, parseHex, type RGB, toHex } from "@/lib/chart";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+
+const NEW_COLOUR_DEFAULT = "#3a7bd5";
 
 export function Swatch({ entry, className }: { entry: PaletteEntry; className?: string }) {
   return (
@@ -20,11 +25,68 @@ export function Swatch({ entry, className }: { entry: PaletteEntry; className?: 
   );
 }
 
+function ColourEditor({
+  initial,
+  submitLabel,
+  onSubmit,
+  onCancel,
+}: {
+  initial: string;
+  submitLabel: string;
+  onSubmit: (rgb: RGB) => void;
+  onCancel: () => void;
+}) {
+  const [hex, setHex] = useState(initial.toUpperCase());
+  const rgb = parseHex(hex);
+  return (
+    <form
+      className="space-y-1.5"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (rgb) onSubmit(rgb);
+      }}
+      onKeyDown={(e) => {
+        if (e.key !== "Escape") return;
+        e.stopPropagation();
+        onCancel();
+      }}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="color"
+          value={rgb ? toHex(rgb) : initial}
+          onChange={(e) => setHex(e.target.value.toUpperCase())}
+          aria-label="Pick a colour"
+          className="h-8 w-10 cursor-pointer rounded-md border bg-background p-0.5"
+        />
+        <Input
+          value={hex}
+          onChange={(e) => setHex(e.target.value)}
+          aria-label="Hex code"
+          aria-invalid={!rgb}
+          spellCheck={false}
+          autoFocus
+          className="h-8 w-28 font-mono uppercase"
+        />
+        <Button type="submit" size="sm" disabled={!rgb}>
+          {submitLabel}
+        </Button>
+        <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+      {!rgb && <p className="text-xs text-destructive">Enter a hex code like #3A7BD5.</p>}
+    </form>
+  );
+}
+
 export function ColourKey({
   chart,
   selectedCount = 0,
   activeColour = null,
   onPick,
+  onChangeColour,
+  onAddColour,
 }: {
   chart: Chart;
   /** Number of selected stitches; when non-zero, entries become buttons that apply their colour. */
@@ -32,19 +94,25 @@ export function ColourKey({
   /** The colour every selected stitch shares, or null if they differ. */
   activeColour?: number | null;
   onPick?: (colour: number) => void;
+  onChangeColour?: (index: number, rgb: RGB) => void;
+  onAddColour?: (rgb: RGB) => void;
 }) {
+  const [editing, setEditing] = useState<number | "new" | null>(null);
   const total = chart.width * chart.height;
   const picking = selectedCount > 0 && !!onPick;
+  const nextLabel = String.fromCharCode(65 + chart.palette.length);
   return (
     <div className="space-y-2">
-      {picking && (
-        <p className="text-sm text-muted-foreground">
-          {selectedCount === 1
+      <p className="text-sm text-muted-foreground">
+        {picking
+          ? selectedCount === 1
             ? "Click a colour to apply it to the selected stitch."
-            : `Click a colour to apply it to all ${selectedCount} selected stitches.`}
-        </p>
-      )}
-      <ul className="grid gap-2 sm:grid-cols-2">
+            : `Click a colour to apply it to all ${selectedCount} selected stitches.`
+          : onChangeColour
+            ? "Use the pencil to change a yarn colour everywhere it's used, or add a new colour and click stitches to use it."
+            : null}
+      </p>
+      <ul className="grid items-start gap-2 sm:grid-cols-2">
         {chart.palette.map((p, i) => {
           const body = (
             <>
@@ -63,25 +131,83 @@ export function ColourKey({
             </>
           );
           return (
-            <li key={p.label}>
-              {picking ? (
-                <button
-                  type="button"
-                  onClick={() => onPick(i)}
-                  aria-pressed={activeColour === i}
-                  className={cn(
-                    "flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-                    activeColour === i && "border-blue-600 ring-1 ring-blue-600",
-                  )}
-                >
-                  {body}
-                </button>
-              ) : (
-                <div className="flex items-center gap-3 rounded-lg border px-3 py-2">{body}</div>
+            <li
+              key={p.label}
+              className={cn("rounded-lg border", picking && activeColour === i && "border-blue-600 ring-1 ring-blue-600")}
+            >
+              <div className="flex items-center gap-1 pr-2">
+                {picking ? (
+                  <button
+                    type="button"
+                    onClick={() => onPick(i)}
+                    aria-pressed={activeColour === i}
+                    className="flex min-w-0 flex-1 items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                  >
+                    {body}
+                  </button>
+                ) : (
+                  <div className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2">{body}</div>
+                )}
+                {onChangeColour && (
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Change colour ${p.label}`}
+                    aria-expanded={editing === i}
+                    title="Change this colour"
+                    onClick={() => setEditing(editing === i ? null : i)}
+                  >
+                    <Pencil />
+                  </Button>
+                )}
+              </div>
+              {editing === i && onChangeColour && (
+                <div className="border-t px-3 py-2.5">
+                  <ColourEditor
+                    initial={p.hex}
+                    submitLabel="Save"
+                    onSubmit={(rgb) => {
+                      onChangeColour(i, rgb);
+                      setEditing(null);
+                    }}
+                    onCancel={() => setEditing(null)}
+                  />
+                </div>
               )}
             </li>
           );
         })}
+        {onAddColour && (
+          <li className="rounded-lg border border-dashed">
+            {chart.palette.length >= MAX_PALETTE ? (
+              <p className="px-3 py-3 text-sm text-muted-foreground">
+                The key is full at {MAX_PALETTE} colours. Change an existing colour instead.
+              </p>
+            ) : editing === "new" ? (
+              <div className="space-y-2 px-3 py-2.5">
+                <p className="text-sm font-medium">New colour {nextLabel}</p>
+                <ColourEditor
+                  initial={NEW_COLOUR_DEFAULT}
+                  submitLabel="Add"
+                  onSubmit={(rgb) => {
+                    onAddColour(rgb);
+                    setEditing(null);
+                  }}
+                  onCancel={() => setEditing(null)}
+                />
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setEditing("new")}
+                className="flex h-full min-h-13 w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              >
+                <Plus className="size-4" />
+                Add colour
+              </button>
+            )}
+          </li>
+        )}
       </ul>
     </div>
   );
