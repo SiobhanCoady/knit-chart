@@ -250,6 +250,52 @@ export function parseHex(input: string): RGB | null {
   return [0, 2, 4].map((i) => parseInt(s.slice(i, i + 2), 16)) as RGB;
 }
 
+export const BLANK_LIMITS = { minStitches: 2, maxStitches: 200, minRows: 2, maxRows: MAX_ROWS };
+
+const BLANK_PALETTE: RGB[] = [
+  [242, 235, 221],
+  [200, 85, 61],
+];
+
+/** A chart filled with its main colour, plus one contrast colour ready to use. */
+export function createBlankChart(width: number, height: number, settings: ChartSettings): Chart {
+  const palette = BLANK_PALETTE.map((rgb, i) => ({
+    rgb,
+    hex: toHex(rgb),
+    symbol: SYMBOLS[i],
+    label: String.fromCharCode(65 + i),
+    count: 0,
+  }));
+  const blankSettings: ChartSettings = { ...settings, stitches: width, colours: palette.length, mode: "general", crop: null };
+  return summariseChart(width, height, new Uint8Array(width * height), palette, blankSettings, 0);
+}
+
+/**
+ * Change the chart's size, keeping row 1 and stitch 1 in place: rows are added or removed at the top and
+ * stitches at the left, matching how charts are read. New stitches are the main colour.
+ */
+export function resizeChart(chart: Chart, width: number, height: number): Chart {
+  if (width === chart.width && height === chart.height) return chart;
+  const cells = new Uint8Array(width * height);
+  const dx = width - chart.width;
+  const dy = height - chart.height;
+  for (let y = 0; y < height; y++) {
+    const oy = y - dy;
+    if (oy < 0 || oy >= chart.height) continue;
+    for (let x = 0; x < width; x++) {
+      const ox = x - dx;
+      if (ox >= 0 && ox < chart.width) cells[y * width + x] = chart.cells[oy * chart.width + ox];
+    }
+  }
+  return summariseChart(width, height, cells, chart.palette, { ...chart.settings, stitches: width }, chart.remappedStitches);
+}
+
+/** Re-check floats and redraw at a new stitch shape without touching any stitches. */
+export function applyChartSettings(chart: Chart, changes: Pick<ChartSettings, "maxFloat" | "stitchAspect">): Chart {
+  if (chart.settings.maxFloat === changes.maxFloat && chart.settings.stitchAspect === changes.stitchAspect) return chart;
+  return summariseChart(chart.width, chart.height, chart.cells, chart.palette, { ...chart.settings, ...changes }, chart.remappedStitches);
+}
+
 /** Change what a palette colour looks like. Every stitch using it changes with it; floats and counts don't. */
 export function setPaletteColour(chart: Chart, index: number, rgb: RGB): Chart {
   const hex = toHex(rgb);

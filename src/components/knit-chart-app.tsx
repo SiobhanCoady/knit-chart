@@ -3,10 +3,14 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
+  ArrowLeft,
   Crop,
   Download,
   FileText,
+  Grid3x3,
   Loader2,
+  Plus,
+  Scaling,
   Redo2,
   RotateCcw,
   RotateCcwSquare,
@@ -23,7 +27,10 @@ import {
   DEFAULT_SETTINGS,
   MAX_ROWS,
   addPaletteColour,
+  applyChartSettings,
+  createBlankChart,
   recolourCells,
+  resizeChart,
   type RGB,
   setPaletteColour,
 } from "@/lib/chart";
@@ -42,6 +49,7 @@ import { CropEditor } from "@/components/crop-editor";
 import { ChartView, MAX_CELL, MIN_CELL } from "@/components/chart-view";
 import { ColourKey, FloatList, RowSummaryList } from "@/components/chart-panels";
 import { RepeatPreview } from "@/components/repeat-preview";
+import { SizeForm } from "@/components/size-form";
 
 interface LoadedImage {
   el: HTMLImageElement;
@@ -95,7 +103,8 @@ export function KnitChartApp() {
   const [loadingImage, setLoadingImage] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [settings, setSettings] = useState<ChartSettings>(DEFAULT_SETTINGS);
-  const [chart, setChart] = useState<Chart | null>(null);
+  const [rawChart, setChart] = useState<Chart | null>(null);
+  const [blank, setBlank] = useState(false);
   const [builtFor, setBuiltFor] = useState<{ image: LoadedImage; settings: ChartSettings } | null>(null);
   const [cropping, setCropping] = useState(false);
   const [showSymbols, setShowSymbols] = useState(true);
@@ -117,6 +126,38 @@ export function KnitChartApp() {
   const update = <K extends keyof ChartSettings>(key: K, value: ChartSettings[K]) =>
     setSettings((s) => ({ ...s, [key]: value }));
 
+  // Blank charts aren't rebuilt from a picture, so setting changes are applied to whatever is being drawn.
+  const chart = useMemo(
+    () =>
+      blank && rawChart
+        ? applyChartSettings(rawChart, { maxFloat: settings.maxFloat, stitchAspect: settings.stitchAspect })
+        : rawChart,
+    [blank, rawChart, settings.maxFloat, settings.stitchAspect],
+  );
+
+  const resetEditing = (next: Chart | null) => {
+    setChart(next);
+    setOriginalChart(null);
+    setHistory({ past: [], future: [] });
+    setSelectedCells(new Set());
+    setPanelTab("key");
+  };
+
+  const startBlank = (width: number, height: number) => {
+    setImage(null);
+    setBlank(true);
+    setError(null);
+    resetEditing(createBlankChart(width, height, settings));
+  };
+
+  const startOver = () => {
+    if (history.past.length && !window.confirm("Start a new chart? Your current chart and its edits will be lost.")) return;
+    setImage(null);
+    setBlank(false);
+    setError(null);
+    resetEditing(null);
+  };
+
   const setRotatedUrl = (url: string | null) => {
     if (rotatedUrlRef.current) URL.revokeObjectURL(rotatedUrlRef.current);
     rotatedUrlRef.current = url;
@@ -131,6 +172,7 @@ export function KnitChartApp() {
       urlRef.current = revoke ? url : null;
       setRotatedUrl(null);
       originalRef.current = { el, url, name };
+      setBlank(false);
       setImage(originalRef.current);
       setRotation(0);
       setSettings((s) => ({ ...s, crop: null }));
@@ -245,6 +287,12 @@ export function KnitChartApp() {
     if (chart) commitEdit(addPaletteColour(chart, rgb));
   };
 
+  const resizeBlank = (width: number, height: number) => {
+    if (!chart) return;
+    setSelectedCells(new Set());
+    commitEdit(resizeChart(chart, width, height));
+  };
+
   const undo = () => {
     const previous = history.past.at(-1);
     if (!chart || !previous) return;
@@ -295,10 +343,10 @@ export function KnitChartApp() {
   };
 
   const runExport = async (kind: "png" | "pdf") => {
-    if (!chart || !image) return;
+    if (!chart) return;
     setExporting(kind);
     try {
-      const name = baseName(image.name);
+      const name = image ? baseName(image.name) : `knit-chart-${chart.width}x${chart.height}`;
       if (kind === "png") exportPng(chart, { showSymbols, highlightFloats }, name);
       else await exportPdf(chart, { showSymbols, highlightFloats }, name);
       toast.success(kind === "png" ? "Chart PNG downloaded" : "Printable PDF downloaded");
@@ -322,20 +370,44 @@ export function KnitChartApp() {
         settings.stitchAspect,
     ) > MAX_ROWS;
 
-  if (!image) {
+  if (!image && !blank) {
     return (
-      <div className="mx-auto w-full max-w-3xl space-y-6">
+      <div className="mx-auto w-full max-w-5xl space-y-6">
         <div className="space-y-3 text-center">
           <Badge variant="secondary">Stranded colourwork ready</Badge>
           <h1 className="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
-            Turn any picture into a knitting chart
+            Turn a picture into a knitting chart, or design your own
           </h1>
           <p className="mx-auto max-w-xl text-pretty text-muted-foreground">
-            Pick how many stitches wide and how many colours, and knit-chart builds a numbered grid with a colour key —
-            keeping each row to two colours for Fair Isle and flagging floats that are too long to carry.
+            Upload a picture and knit-chart builds a numbered grid with a colour key — keeping each row to two colours
+            for Fair Isle and flagging floats that are too long to carry. Or start from an empty grid and draw your
+            motif stitch by stitch.
           </p>
         </div>
-        <UploadZone onFile={onFile} onSample={onSample} disabled={loadingImage} />
+        <div className="grid gap-4 md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+          <UploadZone onFile={onFile} onSample={onSample} disabled={loadingImage} />
+          <Card className="justify-center">
+            <CardHeader>
+              <div className="mb-1 flex size-14 items-center justify-center rounded-full bg-primary/10 text-primary">
+                <Grid3x3 className="size-7" />
+              </div>
+              <CardTitle className="text-lg font-semibold">Start with a blank chart</CardTitle>
+              <CardDescription>
+                Choose a size, then click or drag across stitches and pick colours from the key. You can resize it
+                later.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <SizeForm
+                initialWidth={24}
+                initialHeight={20}
+                submitLabel="Create chart"
+                submitIcon={<Plus data-icon="inline-start" />}
+                onSubmit={startBlank}
+              />
+            </CardContent>
+          </Card>
+        </div>
         {loadingImage && (
           <p className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="size-4 animate-spin" /> Reading your picture…
@@ -358,195 +430,251 @@ export function KnitChartApp() {
     );
   }
 
+  const floatSetting = (
+    <SettingRow
+      label="Longest float allowed"
+      value={`${settings.maxFloat} sts`}
+      hint="Runs of one colour longer than this leave a long strand on the back that should be caught."
+    >
+      <Slider
+        value={[settings.maxFloat]}
+        min={2}
+        max={15}
+        step={1}
+        onValueChange={(v) => update("maxFloat", sliderValue(v))}
+        aria-label="Maximum float length"
+      />
+    </SettingRow>
+  );
+
+  const stitchShapeSetting = (
+    <SettingRow
+      label="Stitch shape (height ÷ width)"
+      value={settings.stitchAspect.toFixed(2)}
+      hint={
+        image
+          ? "Knit stitches are wider than they are tall, so the chart gets more rows than stitches to keep the picture in proportion."
+          : "Knit stitches are wider than they are tall. Matching your gauge shows the motif in its knitted proportions."
+      }
+    >
+      <Slider
+        value={[settings.stitchAspect]}
+        min={0.5}
+        max={1.2}
+        step={0.01}
+        onValueChange={(v) => update("stitchAspect", sliderValue(v))}
+        aria-label="Stitch aspect ratio"
+      />
+      <div className="flex items-center gap-2 text-sm">
+        <span className="text-muted-foreground">From gauge:</span>
+        <Input
+          className="h-7 w-14 text-center"
+          inputMode="decimal"
+          aria-label="Stitches per 10 cm"
+          value={gauge.sts}
+          onChange={(e) => applyGauge({ ...gauge, sts: e.target.value })}
+        />
+        <span className="text-muted-foreground">sts ×</span>
+        <Input
+          className="h-7 w-14 text-center"
+          inputMode="decimal"
+          aria-label="Rows per 10 cm"
+          value={gauge.rows}
+          onChange={(e) => applyGauge({ ...gauge, rows: e.target.value })}
+        />
+        <span className="text-muted-foreground">rows</span>
+      </div>
+    </SettingRow>
+  );
+
   return (
     <div className="grid w-full gap-6 lg:grid-cols-[360px_minmax(0,1fr)]">
       <aside className="space-y-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Picture</CardTitle>
-            <CardDescription className="truncate">{image.name}</CardDescription>
-            <CardAction className="flex gap-1.5">
-              <Button
-                variant="outline"
-                size="icon-sm"
-                onClick={() => rotate(-90)}
-                disabled={rotating || cropping}
-                aria-label="Rotate picture left"
-                title="Rotate left"
-              >
-                <RotateCcwSquare />
-              </Button>
-              <Button
-                variant="outline"
-                size="icon-sm"
-                onClick={() => rotate(90)}
-                disabled={rotating || cropping}
-                aria-label="Rotate picture right"
-                title="Rotate right"
-              >
-                <RotateCwSquare />
-              </Button>
-              <Button
-                variant={cropping ? "default" : "outline"}
-                size="sm"
-                onClick={() => setCropping((c) => !c)}
-                aria-pressed={cropping}
-              >
-                <Crop data-icon="inline-start" />
-                {cropping ? "Done" : "Crop"}
-              </Button>
-            </CardAction>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <CropEditor
-              src={image.url}
-              alt={`Preview of ${image.name}`}
-              crop={settings.crop}
-              editing={cropping}
-              onChange={(c) => update("crop", c)}
-            />
-            {settings.crop && (
-              <Button variant="ghost" size="sm" onClick={() => update("crop", null)}>
-                <Scissors data-icon="inline-start" />
-                Remove crop
-              </Button>
-            )}
-            <UploadZone onFile={onFile} compact disabled={loadingImage} />
-          </CardContent>
-        </Card>
+        <Button variant="ghost" size="sm" onClick={startOver} className="-my-2 -ml-2">
+          <ArrowLeft data-icon="inline-start" />
+          New chart
+        </Button>
+        {image ? (
+          <>
+            <Card>
+              <CardHeader>
+                <CardTitle>Picture</CardTitle>
+                <CardDescription className="truncate">{image.name}</CardDescription>
+                <CardAction className="flex gap-1.5">
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    onClick={() => rotate(-90)}
+                    disabled={rotating || cropping}
+                    aria-label="Rotate picture left"
+                    title="Rotate left"
+                  >
+                    <RotateCcwSquare />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    onClick={() => rotate(90)}
+                    disabled={rotating || cropping}
+                    aria-label="Rotate picture right"
+                    title="Rotate right"
+                  >
+                    <RotateCwSquare />
+                  </Button>
+                  <Button
+                    variant={cropping ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setCropping((c) => !c)}
+                    aria-pressed={cropping}
+                  >
+                    <Crop data-icon="inline-start" />
+                    {cropping ? "Done" : "Crop"}
+                  </Button>
+                </CardAction>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <CropEditor
+                  src={image.url}
+                  alt={`Preview of ${image.name}`}
+                  crop={settings.crop}
+                  editing={cropping}
+                  onChange={(c) => update("crop", c)}
+                />
+                {settings.crop && (
+                  <Button variant="ghost" size="sm" onClick={() => update("crop", null)}>
+                    <Scissors data-icon="inline-start" />
+                    Remove crop
+                  </Button>
+                )}
+                <UploadZone onFile={onFile} compact disabled={loadingImage} />
+              </CardContent>
+            </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Chart settings</CardTitle>
-            <CardAction>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setSettings((s) => ({ ...DEFAULT_SETTINGS, crop: s.crop }));
-                  setGauge({ sts: "22", rows: "28" });
-                }}
-              >
-                <RotateCcw data-icon="inline-start" />
-                Reset
-              </Button>
-            </CardAction>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <SettingRow
-              label="Knitting style"
-              hint={
-                settings.mode === "stranded"
-                  ? "Fair Isle-style: each row only uses its most-used colours; other stitches are recoloured to the nearest allowed one."
-                  : "Unrestricted: every stitch takes its nearest colour, so rows may use any number of colours (intarsia, duplicate stitch, embroidery)."
-              }
-            >
-              <Tabs value={settings.mode} onValueChange={(v) => update("mode", v as ChartSettings["mode"])}>
-                <TabsList className="w-full">
-                  <TabsTrigger value="stranded">Stranded colourwork</TabsTrigger>
-                  <TabsTrigger value="general">General</TabsTrigger>
-                </TabsList>
-              </Tabs>
-            </SettingRow>
-
-            {settings.mode === "stranded" && (
-              <SettingRow label="Colours per row" hint="Two is classic Fair Isle; three is manageable but makes a denser fabric.">
-                <Tabs
-                  value={String(settings.coloursPerRow)}
-                  onValueChange={(v) => update("coloursPerRow", Number(v))}
+            <Card>
+              <CardHeader>
+                <CardTitle>Chart settings</CardTitle>
+                <CardAction>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setSettings((s) => ({ ...DEFAULT_SETTINGS, crop: s.crop }));
+                      setGauge({ sts: "22", rows: "28" });
+                    }}
+                  >
+                    <RotateCcw data-icon="inline-start" />
+                    Reset
+                  </Button>
+                </CardAction>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <SettingRow
+                  label="Knitting style"
+                  hint={
+                    settings.mode === "stranded"
+                      ? "Fair Isle-style: each row only uses its most-used colours; other stitches are recoloured to the nearest allowed one."
+                      : "Unrestricted: every stitch takes its nearest colour, so rows may use any number of colours (intarsia, duplicate stitch, embroidery)."
+                  }
                 >
-                  <TabsList className="w-full">
-                    <TabsTrigger value="2">2 colours</TabsTrigger>
-                    <TabsTrigger value="3">3 colours</TabsTrigger>
-                  </TabsList>
-                </Tabs>
-              </SettingRow>
-            )}
+                  <Tabs value={settings.mode} onValueChange={(v) => update("mode", v as ChartSettings["mode"])}>
+                    <TabsList className="w-full">
+                      <TabsTrigger value="stranded">Stranded colourwork</TabsTrigger>
+                      <TabsTrigger value="general">General</TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                </SettingRow>
 
-            <SettingRow
-              label="Width"
-              value={`${settings.stitches} sts`}
-              hint={
-                rowsClamped
-                  ? `Height is capped at ${MAX_ROWS} rows — crop the picture or use fewer stitches.`
-                  : `Height follows the picture: ${projectedRows} rows.`
-              }
-            >
-              <Slider
-                value={[settings.stitches]}
-                min={10}
-                max={200}
-                step={1}
-                onValueChange={(v) => update("stitches", sliderValue(v))}
-                aria-label="Chart width in stitches"
-              />
-            </SettingRow>
+                {settings.mode === "stranded" && (
+                  <SettingRow label="Colours per row" hint="Two is classic Fair Isle; three is manageable but makes a denser fabric.">
+                    <Tabs
+                      value={String(settings.coloursPerRow)}
+                      onValueChange={(v) => update("coloursPerRow", Number(v))}
+                    >
+                      <TabsList className="w-full">
+                        <TabsTrigger value="2">2 colours</TabsTrigger>
+                        <TabsTrigger value="3">3 colours</TabsTrigger>
+                      </TabsList>
+                    </Tabs>
+                  </SettingRow>
+                )}
 
-            <SettingRow
-              label="Colours"
-              value={settings.colours}
-              hint="The picture is reduced to this many yarn colours using k-means clustering."
-            >
-              <Slider
-                value={[settings.colours]}
-                min={2}
-                max={12}
-                step={1}
-                onValueChange={(v) => update("colours", sliderValue(v))}
-                aria-label="Number of colours"
-              />
-            </SettingRow>
+                <SettingRow
+                  label="Width"
+                  value={`${settings.stitches} sts`}
+                  hint={
+                    rowsClamped
+                      ? `Height is capped at ${MAX_ROWS} rows — crop the picture or use fewer stitches.`
+                      : `Height follows the picture: ${projectedRows} rows.`
+                  }
+                >
+                  <Slider
+                    value={[settings.stitches]}
+                    min={10}
+                    max={200}
+                    step={1}
+                    onValueChange={(v) => update("stitches", sliderValue(v))}
+                    aria-label="Chart width in stitches"
+                  />
+                </SettingRow>
 
-            <SettingRow
-              label="Longest float allowed"
-              value={`${settings.maxFloat} sts`}
-              hint="Runs of one colour longer than this leave a long strand on the back that should be caught."
-            >
-              <Slider
-                value={[settings.maxFloat]}
-                min={2}
-                max={15}
-                step={1}
-                onValueChange={(v) => update("maxFloat", sliderValue(v))}
-                aria-label="Maximum float length"
-              />
-            </SettingRow>
+                <SettingRow
+                  label="Colours"
+                  value={settings.colours}
+                  hint="The picture is reduced to this many yarn colours using k-means clustering."
+                >
+                  <Slider
+                    value={[settings.colours]}
+                    min={2}
+                    max={12}
+                    step={1}
+                    onValueChange={(v) => update("colours", sliderValue(v))}
+                    aria-label="Number of colours"
+                  />
+                </SettingRow>
 
-            <SettingRow
-              label="Stitch shape (height ÷ width)"
-              value={settings.stitchAspect.toFixed(2)}
-              hint="Knit stitches are wider than they are tall, so the chart gets more rows than stitches to keep the picture in proportion."
-            >
-              <Slider
-                value={[settings.stitchAspect]}
-                min={0.5}
-                max={1.2}
-                step={0.01}
-                onValueChange={(v) => update("stitchAspect", sliderValue(v))}
-                aria-label="Stitch aspect ratio"
-              />
-              <div className="flex items-center gap-2 text-sm">
-                <span className="text-muted-foreground">From gauge:</span>
-                <Input
-                  className="h-7 w-14 text-center"
-                  inputMode="decimal"
-                  aria-label="Stitches per 10 cm"
-                  value={gauge.sts}
-                  onChange={(e) => applyGauge({ ...gauge, sts: e.target.value })}
-                />
-                <span className="text-muted-foreground">sts ×</span>
-                <Input
-                  className="h-7 w-14 text-center"
-                  inputMode="decimal"
-                  aria-label="Rows per 10 cm"
-                  value={gauge.rows}
-                  onChange={(e) => applyGauge({ ...gauge, rows: e.target.value })}
-                />
-                <span className="text-muted-foreground">rows</span>
-              </div>
-            </SettingRow>
-          </CardContent>
-        </Card>
+                {floatSetting}
+                {stitchShapeSetting}
+              </CardContent>
+            </Card>
+          </>
+        ) : (
+          chart && (
+            <>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Blank chart</CardTitle>
+                  <CardDescription>
+                    {chart.width} sts × {chart.height} rows
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <SizeForm
+                    key={`${chart.width}x${chart.height}`}
+                    initialWidth={chart.width}
+                    initialHeight={chart.height}
+                    submitLabel="Resize"
+                    submitIcon={<Scaling data-icon="inline-start" />}
+                    requireChange
+                    onSubmit={resizeBlank}
+                  />
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    Rows are added or removed at the top and stitches at the left, so row 1 and stitch 1 stay put. New
+                    stitches are colour A. Resizing can be undone.
+                  </p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Chart settings</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {floatSetting}
+                  {stitchShapeSetting}
+                </CardContent>
+              </Card>
+            </>
+          )
+        )}
       </aside>
 
       <section className="min-w-0 space-y-6">

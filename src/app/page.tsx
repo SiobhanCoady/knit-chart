@@ -16,7 +16,7 @@ export default function Home() {
             </svg>
             <span className="font-semibold tracking-tight">knit-chart</span>
           </div>
-          <p className="hidden text-sm text-muted-foreground sm:block">Picture → colourwork chart, right in your browser</p>
+          <p className="hidden text-sm text-muted-foreground sm:block">Colourwork charts from a picture or from scratch</p>
         </div>
       </header>
       <main className="mx-auto flex w-full max-w-7xl flex-1 px-4 py-8 sm:px-6 sm:py-10">
